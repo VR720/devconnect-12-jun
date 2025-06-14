@@ -11,6 +11,7 @@ import ForgotPassword from "./pages/auth/ForgotPassword.jsx";
 import Login from "./pages/auth/Login.jsx";
 import Verify from "./pages/auth/Verify.jsx";
 import DashBoard from "./pages/dashboard/DashBoard.jsx";
+import TestContext from "./pages/TestContext.jsx";
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
             element={<ResetPassword />}
           ></Route>
           <Route path="/dashboard" element={<DashBoard />}></Route>
+          <Route path="/test-auth" element={<TestContext />} />
         </Routes>
       </BrowserRouter>
     </>

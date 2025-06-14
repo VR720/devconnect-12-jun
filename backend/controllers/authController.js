@@ -66,12 +66,52 @@ export const verifyEmail = async (req, res) => {
 // @route   POST /api/auth/login
 // @desc    Log in user and issue tokens
 
-export const loginUser = async (req, res) => {
-  const { email, password } = req.body;
+// export const loginUser = async (req, res) => {
+//   const { email, password } = req.body;
 
+//   try {
+//     const user = await User.findOne({ email });
+//     if (!user) return res.status(400).json({ message: "Invalid credentials" });
+
+//     if (!user.isVerified) {
+//       return res
+//         .status(401)
+//         .json({ message: "Please verify your email first" });
+//     }
+
+//     const match = bcrypt.compare(password, user.password);
+//     if (!match) return res.status(400).json({ message: "Invalid credentials" });
+
+//     const accessToken = generateAccessToken(user._id);
+//     const refreshToken = generateRefreshToken(user._id);
+
+//     res
+//       .cookie("refreshToken", refreshToken, {
+//         httpOnly: true,
+//         secure: true,
+//         sameSite: "Strict",
+//         maxAge: 7 * 24 * 60 * 60 * 1000,
+//       })
+//       .json({ accessToken });
+//   } catch (err) {
+//     // res.status(500).json({ message: "Login failed" });
+//     res.status(500).json({ message: err.message });
+//   }
+// };
+
+export const loginUser = async (req, res) => {
   try {
+    const { email, password } = req.body;
+
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+    if (!user) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
 
     if (!user.isVerified) {
       return res
@@ -79,23 +119,29 @@ export const loginUser = async (req, res) => {
         .json({ message: "Please verify your email first" });
     }
 
-    const match = bcrypt.compare(password, user.password);
-    if (!match) return res.status(400).json({ message: "Invalid credentials" });
-
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
+    // ✅ Set refresh token as secure cookie
     res
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
-        secure: true,
+        secure: true, // or conditionally set for production
         sameSite: "Strict",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       })
-      .json({ accessToken });
+      .status(200)
+      .json({
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+        },
+        accessToken,
+      });
   } catch (err) {
-    // res.status(500).json({ message: "Login failed" });
-    res.status(500).json({ message: err.message });
+    console.error("Login error:", err.message || err);
+    res.status(500).json({ message: "Server error during login" });
   }
 };
 
@@ -173,22 +219,51 @@ export const refreshToken = async (req, res) => {
 
 // @route   POST /api/auth/logout
 // @desc    Clear refresh token cookie
+// export const logoutUser = (req, res) => {
+//   res.clearCookie("refreshToken", {
+//     httpOnly: true,
+//     secure: true,
+//     sameSite: "Strict",
+//   });
+//   // res.json({ message: "Logged out successfully" });
+//   res.status(403).json({ message: err.message });
+// };
+
 export const logoutUser = (req, res) => {
-  res.clearCookie("refreshToken", {
-    httpOnly: true,
-    secure: true,
-    sameSite: "Strict",
-  });
-  res.json({ message: "Logged out successfully" });
+  try {
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: true, // set false for localhost only during dev
+      sameSite: "Strict",
+    });
+
+    return res.status(200).json({ message: "Logged out successfully" });
+  } catch (err) {
+    console.error("Logout error:", err.message || err);
+    return res.status(500).json({ message: "Logout failed" });
+  }
 };
 
 // @route   GET /api/auth/me
 // @desc    Get current authenticated user
+// export const getCurrentUser = async (req, res) => {
+//   try {
+//     const user = await User.findById(req.user.id).select("-password");
+//     res.json(user);
+//   } catch (err) {
+//     // res.status(500).json({ message: "Failed to fetch user" });
+//     res.status(500).json({ message: err.message });
+//     console.log(err.message);
+//   }
+// };
+
+// @desc    Get current authenticated user
 export const getCurrentUser = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password");
-    res.json(user);
+    // Since req.user already contains id, name, email (from middleware), no need to query DB again
+    res.status(200).json({ user: req.user });
   } catch (err) {
+    console.error("getCurrentUser error:", err.message);
     res.status(500).json({ message: "Failed to fetch user" });
   }
 };
