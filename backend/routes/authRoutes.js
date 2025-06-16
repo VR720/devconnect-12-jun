@@ -21,7 +21,7 @@ router.post("/login", loginUser);
 router.get("/verify-email/:token", verifyEmail);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password/:token", resetPassword);
-router.get("/refresh-token", refreshToken);
+router.post("/refresh-token", refreshToken);
 router.post("/logout", logoutUser);
 router.get("/me", protect, getCurrentUser);
 

@@ -16,7 +16,7 @@ const TestContext = () => {
         <p>Loading...</p>
       ) : (
         <>
-          <p>User: {user ? JSON.stringify(user) : "Not logged in"}</p>
+          <p>User: {user ? JSON.stringify(user.name) : "Not logged in"}</p>
           <p>Access Token: {accessToken ? "✅ Exists" : "❌ None"}</p>
           <button
             onClick={handleLogin}

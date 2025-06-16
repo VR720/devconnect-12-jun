@@ -1,5 +1,3 @@
-//  # All auth-related logic (register, login, etc.)
-
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -18,8 +16,6 @@ import {
 const CLIENT_URL = process.env.CLIENT_URL;
 
 // @route   POST /api/auth/register
-// @desc    Register a new user
-
 export const registerUser = async (req, res) => {
   const { name, email, password } = req.body;
 
@@ -43,14 +39,12 @@ export const registerUser = async (req, res) => {
   }
 };
 
-// Get current user mgcyfdsew
 // @route   GET /api/auth/verify-email/:token
-// @desc    Verify user email
-
 export const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
     const decoded = jwt.verify(token, process.env.JWT_VERIFY_SECRET);
+
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -64,90 +58,56 @@ export const verifyEmail = async (req, res) => {
 };
 
 // @route   POST /api/auth/login
-// @desc    Log in user and issue tokens
-
-// export const loginUser = async (req, res) => {
-//   const { email, password } = req.body;
-
-//   try {
-//     const user = await User.findOne({ email });
-//     if (!user) return res.status(400).json({ message: "Invalid credentials" });
-
-//     if (!user.isVerified) {
-//       return res
-//         .status(401)
-//         .json({ message: "Please verify your email first" });
-//     }
-
-//     const match = bcrypt.compare(password, user.password);
-//     if (!match) return res.status(400).json({ message: "Invalid credentials" });
-
-//     const accessToken = generateAccessToken(user._id);
-//     const refreshToken = generateRefreshToken(user._id);
-
-//     res
-//       .cookie("refreshToken", refreshToken, {
-//         httpOnly: true,
-//         secure: true,
-//         sameSite: "Strict",
-//         maxAge: 7 * 24 * 60 * 60 * 1000,
-//       })
-//       .json({ accessToken });
-//   } catch (err) {
-//     // res.status(500).json({ message: "Login failed" });
-//     res.status(500).json({ message: err.message });
-//   }
-// };
-
 export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    // 1. Check user existence
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
+    // 2. Compare password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    if (!user.isVerified) {
-      return res
-        .status(401)
-        .json({ message: "Please verify your email first" });
-    }
+    // 3. Optional: Check email verification
+    // if (!user.isVerified) {
+    //   return res.status(401).json({ message: "Please verify your email first" });
+    // }
 
+    // 4. Generate tokens
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
-    // ✅ Set refresh token as secure cookie
-    res
-      .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: true, // or conditionally set for production
-        sameSite: "Strict",
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      })
-      .status(200)
-      .json({
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-        },
-        accessToken,
-      });
+    // 5. Set refresh token cookie (with path)
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      path: "/api/auth/refresh-token", // ✅ Only send with refresh endpoint
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    // 6. Respond with access token and user info
+    res.status(200).json({
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+      },
+      accessToken,
+    });
   } catch (err) {
-    console.error("Login error:", err.message || err);
+    console.error("Login error:", err.message);
     res.status(500).json({ message: "Server error during login" });
   }
 };
 
 // @route   POST /api/auth/forgot-password
-// @desc    Send password reset email
-
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
@@ -160,7 +120,7 @@ export const forgotPassword = async (req, res) => {
     const hash = crypto.createHash("sha256").update(resetToken).digest("hex");
 
     user.resetPasswordToken = hash;
-    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 mins
+    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
     await user.save();
 
     const resetURL = `${CLIENT_URL}/reset-password/${resetToken}`;
@@ -168,19 +128,18 @@ export const forgotPassword = async (req, res) => {
 
     res.json({ message: "Reset link sent to email" });
   } catch (err) {
-    // res.status(500).json({ message: "Error sending reset link" });
     res.status(500).json({ message: err.message });
   }
 };
 
 // @route   POST /api/auth/reset-password/:token
-// @desc    Reset user password
 export const resetPassword = async (req, res) => {
   const { token } = req.params;
   const { password } = req.body;
 
   try {
     const hash = crypto.createHash("sha256").update(token).digest("hex");
+
     const user = await User.findOne({
       resetPasswordToken: hash,
       resetPasswordExpire: { $gt: Date.now() },
@@ -200,70 +159,51 @@ export const resetPassword = async (req, res) => {
   }
 };
 
-// @route   GET /api/auth/refresh-token
-// @desc    Refresh and return a new access token
+// @route   POST /api/auth/refresh-token
 export const refreshToken = async (req, res) => {
+  console.log("🍪 Cookies received:", req.headers.cookie); // Debugging line
+
   const token = req.cookies.refreshToken;
 
-  if (!token) return res.status(401).json({ message: "No token" });
+  if (!token) {
+    return res.status(401).json({ message: "No token" });
+  }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
     const accessToken = generateAccessToken(decoded.id);
-    res.json({ accessToken });
+
+    return res.status(200).json({ accessToken });
   } catch (err) {
-    // res.status(403).json({ message: "Invalid token" });
-    res.status(403).json({ message: err.message });
+    console.error("❌ Refresh error:", err.message);
+    return res
+      .status(403)
+      .json({ message: "Invalid or expired refresh token" });
   }
 };
 
 // @route   POST /api/auth/logout
-// @desc    Clear refresh token cookie
-// export const logoutUser = (req, res) => {
-//   res.clearCookie("refreshToken", {
-//     httpOnly: true,
-//     secure: true,
-//     sameSite: "Strict",
-//   });
-//   // res.json({ message: "Logged out successfully" });
-//   res.status(403).json({ message: err.message });
-// };
-
 export const logoutUser = (req, res) => {
   try {
     res.clearCookie("refreshToken", {
       httpOnly: true,
-      secure: true, // set false for localhost only during dev
+      secure: process.env.NODE_ENV === "production",
       sameSite: "Strict",
     });
 
     return res.status(200).json({ message: "Logged out successfully" });
   } catch (err) {
-    console.error("Logout error:", err.message || err);
+    console.error("Logout error:", err.message);
     return res.status(500).json({ message: "Logout failed" });
   }
 };
 
 // @route   GET /api/auth/me
-// @desc    Get current authenticated user
-// export const getCurrentUser = async (req, res) => {
-//   try {
-//     const user = await User.findById(req.user.id).select("-password");
-//     res.json(user);
-//   } catch (err) {
-//     // res.status(500).json({ message: "Failed to fetch user" });
-//     res.status(500).json({ message: err.message });
-//     console.log(err.message);
-//   }
-// };
-
-// @desc    Get current authenticated user
 export const getCurrentUser = async (req, res) => {
   try {
-    // Since req.user already contains id, name, email (from middleware), no need to query DB again
     res.status(200).json({ user: req.user });
   } catch (err) {
-    console.error("getCurrentUser error:", err.message);
+    console.error(err.message);
     res.status(500).json({ message: "Failed to fetch user" });
   }
 };

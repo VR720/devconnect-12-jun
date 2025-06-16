@@ -1,83 +1,119 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import api from "../api/axios";
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
-export const AuthProvider = ({ children }) => {
+function AuthProvider({ children }) {
   const [accessToken, setAccessToken] = useState(() => {
-    const token = localStorage.getItem("accessToken");
-    return token && token !== "undefined" ? token : null;
+    const stored = localStorage.getItem("accessToken");
+    return stored && stored !== "undefined" && stored !== "null"
+      ? stored
+      : null;
   });
+
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Interceptor: refresh token on 401 errors with expired JWT
+  useEffect(() => {
+    const interceptor = api.interceptors.response.use(
+      (res) => res,
+      async (error) => {
+        const originalRequest = error.config;
+        const status = error?.response?.status;
+        const message = error?.response?.data?.message || "";
+
+        if (
+          status === 401 &&
+          !originalRequest._retry &&
+          message.toLowerCase().includes("jwt")
+        ) {
+          originalRequest._retry = true;
+          try {
+            const res = await api.post(
+              "/auth/refresh-token",
+              {},
+              { withCredentials: true }
+            );
+            const newAccessToken = res.data.accessToken;
+
+            setAccessToken(newAccessToken);
+            localStorage.setItem("accessToken", newAccessToken);
+
+            originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+            return api(originalRequest); // Retry original request
+          } catch (refreshErr) {
+            console.error("❌ Refresh token failed:", refreshErr);
+            logout(); // Clear everything if refresh fails
+          }
+        }
+
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      api.interceptors.response.eject(interceptor);
+    };
+  }, []);
+
   const getCurrentUser = async () => {
     const token = accessToken || localStorage.getItem("accessToken");
-    console.log("🔍 Checking current user with token:", token);
-
     if (!token || token === "undefined" || token === "null") {
-      console.warn("❌ Invalid token on load");
-      setUser(null);
-      setAccessToken(null);
-      localStorage.removeItem("accessToken");
+      logout(); // Clean state if token is missing
       setLoading(false);
       return;
     }
 
     try {
       const res = await api.get("/auth/me", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
 
       setUser(res.data.user);
-      setAccessToken(res.data.accessToken);
-      localStorage.setItem("accessToken", res.data.accessToken);
-    } catch (err) {
-      console.error("❌ /auth/me failed:", err.response?.data || err.message);
-      const msg = err.response?.data?.message?.toLowerCase() || "";
 
-      if (msg.includes("jwt")) {
-        console.warn("Removing invalid/malformed JWT");
-        setAccessToken(null);
-        setUser(null);
-        localStorage.removeItem("accessToken");
+      // Only update token if new one is provided
+      if (res.data.accessToken) {
+        setAccessToken(res.data.accessToken);
+        localStorage.setItem("accessToken", res.data.accessToken);
       }
+    } catch (err) {
+      console.error("❌ Failed to fetch user:", err);
+      logout(); // Invalid token — log out
     } finally {
       setLoading(false);
     }
   };
 
+  // Run on mount
   useEffect(() => {
     getCurrentUser();
   }, []);
 
   const login = async (email, password) => {
     try {
-      const res = await api.post("/auth/login", { email, password });
-      const { user, accessToken } = res.data;
+      const res = await api.post(
+        "/auth/login",
+        { email, password },
+        { withCredentials: true }
+      );
 
-      if (!accessToken || typeof accessToken !== "string") {
-        throw new Error("Invalid access token received from server.");
-      }
+      const { user, accessToken } = res.data;
 
       setUser(user);
       setAccessToken(accessToken);
       localStorage.setItem("accessToken", accessToken);
-
-      console.log("✅ Login success:", user);
     } catch (err) {
-      console.error("❌ Login failed:", err.response?.data || err.message);
-      alert(err.response?.data?.message || "Login error");
+      alert(err.response?.data?.message || "Login failed");
     }
   };
 
   const logout = async () => {
     try {
-      await api.post("/auth/logout");
+      await api.post("/auth/logout", {}, { withCredentials: true });
     } catch (err) {
-      console.error("❌ Logout failed:", err.response?.data || err.message);
+      console.error("Logout failed:", err);
     } finally {
       setUser(null);
       setAccessToken(null);
@@ -92,6 +128,10 @@ export const AuthProvider = ({ children }) => {
       {children}
     </AuthContext.Provider>
   );
-};
+}
 
-export const useAuth = () => useContext(AuthContext);
+function useAuth() {
+  return useContext(AuthContext);
+}
+
+export { AuthProvider, useAuth };
